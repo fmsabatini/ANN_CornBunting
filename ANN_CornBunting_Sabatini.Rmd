@@ -99,16 +99,22 @@ Illustration of Corn Bunting. Source: Wikipedia.com
 Here, we will use ANN to train a model predicting the occurrence of the Corn Bunting over a landscape in Brandenburg.   
 
 ## Prepare and check data
+```{r, eval=F, echo=F}
+#Start live server
+server <- livecode::serve_file(bitly = T)
+```
+
 Let's open up R
 ```{r, message=F, warning=F}
 # Install packages, if needed
-#install.packages(c("dplyr", "sf", "ggplot2", 
+#install.packages(c("dplyr", "readxl", "sf", "ggplot2", 
 #                       "neuralnet", "corrplot", "cowplot"))
 
 #Load Required libraries
 # improved data manipulation
 library(dplyr)
 library(corrplot)
+library(readxl)
 # Spatial 
 library(sf)
 # visualization
@@ -119,18 +125,22 @@ library(neuralnet)
 ```
 We can now import our input data.
 
-Data are temporaly available at the following link:
+Data and code are temporally available at the following link:  
+
 [https://portal.idiv.de/nextcloud/index.php/s/qkEELH8ywtJnYAW](https://portal.idiv.de/nextcloud/index.php/s/qkEELH8ywtJnYAW)  
 
-```{r, cache=T, warning=F, message=F, results = 'hide'}
+
+
+
+```{r import data, cache=T, warning=F, message=F, results = 'hide'}
 ## import data
 Biotopes_sf <- st_read("data/Brandenburg_Biotops_2009.gpkg")
 grid_sf <- st_read("data/zt_v100_UTM33N.gpkg")
-mydata <- readxl::read_xls("data/zt_habitat_corn_bunting.xls",sheet = 1)
+mydata <- read_xls("data/zt_habitat_corn_bunting.xls",sheet = 1)
 ```
 Let's check the data:
 
-```{r}
+```{r check data1}
 head(mydata)
 ```
 \bigbreak
@@ -156,9 +166,9 @@ table(mydata$class)
 ```
 \bigbreak
 Our response variable spans between 0 (unsuitable) and 1 (suitable), which is fine. 
-The predictors, instead, have wildly different ranges. `NS` for instance ranges between 0 and 677, while other variables (e..g, `AK`) range between 0-10000. This can be a problem when training our neural network. It is highly recommended to standardize all predictors before training a NN. We do it now.  
+The predictors, instead, have wildly different ranges. `NS` for instance ranges between 0 and 677, while other variables (e.g., `AK`) range between 0-10000. This can be a problem when training our neural network. It is highly recommended to standardize all predictors before training a NN. We do it now.  
 \bigbreak
-```{r}
+```{r standardize predictors}
 ## standardize variables to 0 - 1 range
 # we drop the first (index) and the last two(HSI and response variable)columns
 predictors <- mydata[,c(2:8)] 
@@ -173,7 +183,7 @@ summary(mydata.scaled)
 \bigbreak
 Now, let's take a quick look to the spatial data. If you are unfamiliar with the plotting package `ggplot2`, don't worry. Just take a look at the output. Any alternative way of visualizing the data would work equally good. 
 
-```{r, cache=T}
+```{r plot spatial data, cache=T}
 #plot data 
 #Careful, the graph below renders slowly
 (Landuse <- ggplot(data=Biotopes_sf) +  ## renders slowly
@@ -197,20 +207,20 @@ Study area. Source: OpenStreetMap
 \end{center}
 \bigbreak
 
-This helps us understand better the legend. We can clearly see a couple of big lakes (orange, Grimnitzsee to the West, Parsteinersee to the SE), and some infrastructure lines. The linear element cutting the NW corner of the tile is the highway A11. Purple loosely correspond to agricultural land. Green and blue colors represent different kind of forests.  
+This helps us understand better the legend. We can clearly see a couple of big lakes (orange, Grimnitzsee to the West, Parsteinersee to the SE), and some infrastructure lines. The linear element cutting the NW corner of the tile is the highway A11. Purple loosely corresponds to agricultural land. Green and blue colors represent different kinds of forests.  
 \bigbreak
 
  
-Let's take a closer loot at the content of the Biotopes dataset. 
+Let's take a closer look at the content of the `Biotopes` dataset. 
 ```{r}
 head(Biotopes_sf)
 ```
 There is a lot of information that we don't probably need. Just take a look at the `Biotyp_8st` columns, which we used for visualization, and the corresponding legend in the `CIR_text` column. There seems to be a problem with the encoding of the latter, but let's not worry about that for now. 
 
-## Train a multilayer NN
+## Training a multilayer ANN
 To train our ANN, we need to prepare our *train* and *test* datasets. Normally, this is done splitting the input dataset in two chunks. Often, 80% is used for training, and 20% for testing. Training the ANN is computing intensive, though, and our time limited. To reduce training time, let's use only 1/5th of our dataset for now.
 
-```{r}
+```{r split train vs test data}
 set.seed(899) # set a seed, so to make the resampling procedure reproducible
 mydata.subset <- sample_frac(mydata.scaled, size=0.2) 
 #function sample_frac comes from dplyr package! 
@@ -223,20 +233,20 @@ train = mydata.subset[train.id,]
 test = mydata.subset[-train.id,]
 ```
 
-We almost ready to fit our first NN. Last thing to do, is to specify its formula and think of the number of layers, and nodes per layers we need. There's no golden rule, but some helpful guidance comes from practice. Most of the problems can actually be solved with only two layers. Also, there is a rule of thumb which suggests that the number of nodes should be smaller than the number of predictors.  
+We are almost ready to fit our first NN. Last thing to do, is to specify its formula and think of the number of layers, and nodes per layers we need. There's no golden rule, but some helpful guidance comes from practice. Most of the problems can actually be solved with only two layers. Also, there is a rule of thumb which suggests that the number of nodes should be smaller (about 2/3rd) than the number of predictors.  
 Let's start with a simple ANN having 2 layers (i.e., only 1 hidden layer), and 5 nodes. 
 ```{r}
 myformula <- as.formula("class ~ NS + TM + WN + SN + AK + DL + WW")
 ```
 
-```{r, cache=T}
+```{r train network (0-1), cache=T}
 set.seed(900)
 nn_5 <- neuralnet(myformula, train, hidden=c(5), lifesign='minimal', threshold=0.01,
                   linear.output = F)
 ```
 Oooops!
 \bigbreak
-Something went wrong and the training didn't succeed within the number of cycles (aka 'epochs') we preset. What to do now? We have different strategies. We could increase the number of cycles, or decrease our sensitivity threshold. Check the function help `?neuralnet` and try to understand how this could be done. To understand what the sensitivity threshold means in practice, you can check this website: [https://ml4a.github.io/ml4a/how_neural_networks_are_trained/](https://ml4a.github.io/ml4a/how_neural_networks_are_trained/).  
+Something went wrong and the training didn't succeed within the number of cycles (aka 'epochs') we preset. What to do now? We have different options We could increase the number of cycles, or decrease our sensitivity threshold. Check the function help `?neuralnet` and try to understand how this could be done. To understand what the sensitivity threshold means in practice, you can check this website: [https://ml4a.github.io/ml4a/how_neural_networks_are_trained/](https://ml4a.github.io/ml4a/how_neural_networks_are_trained/).  
 
 Here is another useful trick, though. Part of the reason why our ANN is so slow at converging, depends on the fact that we are training it to return either zeros or ones. These values are at the extreme end of the activation function, which normally takes the shape of a sigmoid.  
 
@@ -252,10 +262,10 @@ which is defined by the function:
 \end{center}
 
 
-When the ANN is training, the errors are backpropagated to correct the weights. Now the problem is that the new weights are corrected of a quantity which is proportional to the derivative of the output of the sigmoid function. This derivative is equal to `y(1-y)`, where y is the output of the sigmoid. When y is close to 0 or 1, this quantify becomes extremely small, causing our ANN to converge extremely slowly.  
+When the ANN is training, the errors are backpropagated to correct the weights. Now the problem is that the new weights are corrected of a quantity which is proportional to the derivative of the output of the sigmoid function. This derivative is equal to `y(1-y)`, where y is the output of the sigmoid. When y is close to 0 or 1, this quantity becomes extremely small, causing our ANN to converge extremely slowly.  
 That's why it can be helpful, sometimes, to recode our 0-1 response variables to new values, i.e., 0 -> 0.2, and 1 -> 0.8. Not convinced? Let's give it a try.
 
-```{r, cache=T}
+```{r train nn on 0.8-0.2, cache=T}
 train_recoded <- train
 train_recoded$class <- train_recoded$class*0.6+0.2
 table(train_recoded$class)
@@ -266,32 +276,32 @@ The ANN converged, and much faster now!
 
 
 Let's explore the output, now
-```{r, fig.align="center", fig.height=10, fig.width=10, message=F, warning=F}
+```{r plot nn output, fig.align="center", fig.height=10, fig.width=10, message=F, warning=F}
 plot(nn_5, rep = "best")
 ```
 Nice!  
-Notice how each input flows into the network, is contributed to the hidden layer based on some (the numbers on the lines), and how the results at each node of the hidden layer are finally recomposed into our single output. The blue circle and lines represent the *bias*. 
+Notice how each input flows into the network, is contributed to the hidden layer based on some weights (the numbers on the lines), and how the results at each node of the hidden layer are finally recomposed in the output layer (1 neuron) and returned as output. The blue circle and lines represent the *bias*. 
 
-**YOUR TURN** - Search the internet, and see if you can quickly figure WHY we need a bias.
+**YOUR TURN** - Search the internet, and see if you can quickly figure out WHY we need a bias.
 
 ## Interpret the output
 
 Let's take a closer look at the weights:
-```{r}
+```{r check weights}
 nn_5$weights
 ```
 \bigbreak
 It's not so easy to understand how these weights are combined in practice to return the habitat suitability of the corn bunting.  
-ANN are famous for being *black boxes*. Indeed the interpretation of the weights is not so straightforward. Yet, we can see that some weights are larger than others. Look for instance, how neuron 1 is dominated by the negative weights of the sixth and eight inputs (don't consider the bias, i.e., the first row, for now), i.e., `AK` and `WW`, which are the share of cropland and meadows, respectively. This seems to have a strong negative effect on neuron 1, which reverberates along this specific pathway. Yet, understanding the combined effect of `AK` or `WW` across ALL pathways is really challenging.  
+ANN are famous for being *black boxes*. Indeed the interpretation of the weights is not so straightforward. Yet, we can see that some weights are larger than others. Let's focus, for instance, on the weights of the sixth input (don't consider the bias, i.e., the first row, for now), i.e., `AK` which is the share of cropland. Understanding the combined effect of this input across ALL pathways is pretty challenging!  
 
 ANN are great tools for *predicting* something, but are not the best way of testing hypotheses!  
 This justifies the saying *'NN are the second best way to solve any problems. The first one is to actually understand a problem'*
 \bigbreak
 
-There's a turnaround, though, to get a glimpse of the effect of a variable on the overall likelihood that the a specific pixel provides suitable habitat to the corn bunting. We can simply create a new dataset, where we set all variables at their respective means, except for the one variable of interest. For the latter, we create a sequence of values spanning through the whole original range (0-1 in our case).   
-As an example, let's see what happens when the share of loamy soils (=`DL`) in a pixel increases, *all else being equal*.  
+There's a turnaround, though, to get a glimpse of the effect of a variable on the overall likelihood that a specific pixel is suitable habitat. We can simply create a new dataset, where we set all variables at their respective means, except for the one variable of interest. For the latter, we create a sequence of values spanning through the whole original range (0-1 in our case).   
+As an example, let's see what happens when the share of cropland (=`AK`) in a pixel increases, *all else being equal*.  
 
-```{r, fig.align="center", fig.height=3, fig.width=4, message=F, warning=F}
+```{r Partial Dependency Plots, fig.align="center", fig.height=3, fig.width=4, message=F, warning=F}
 # create a new dataset
 newdata <- as.data.frame(t(apply(scaled, MARGIN=2, "mean")))
 newdata <- newdata[rep(1,100),] #repeat the means 100 times
@@ -302,17 +312,17 @@ newdata$predict = predict_newdata$net.result
 # plot
 ggplot(data=newdata) + 
   geom_line(aes(x=AK, y=predict)) + 
-  theme_bw()
+  theme_bw() 
 ```
-From the graph, we can see that the likelihood that a pixel is classified as 'suitable' progressively increases when the share of agricultural land increases.
+From the graph, we can see how the likelihood of a pixel to be classified as 'suitable' varies when the share of agricultural land increases.
 
-**YOUR TURN** - How do our predictions vary for increasing `WW` all else being equal?
+**YOUR TURN** - How do your predictions vary for increasing `AK` in your model? Does it differ from what shown here? Why in your opinion? Try also recalculating the same curve, but for `WW` (i.e., the share of meadows in a grid cell) all else being equal. 
 
 
 ## Measure the NN's performance
 We are not done, yet. We have to understand how our network performs. To do this, we have to calculate the error based on the `test` dataset. Here, we calculate **Sum of squared errors** (SSE) and the **Mean Square Error** (MSE), i.e., the average squared difference between our NN's predictions, and the known answers from the test data.
 We need to be consistent, though. Therefore, we first recode also the test dataset to 0.2 & 0.8.
-```{r, fig.align="center", fig.height=4, fig.width=5, message=F, warning=F}
+```{r calculate MSE, fig.align="center", fig.height=4, fig.width=5, message=F, warning=F}
 #transform test data to 0.2 - 0.8
 test_recoded <- test
 test_recoded$class <- test_recoded$class*0.6+0.2
@@ -343,7 +353,7 @@ How do we know whether ours is the best possible ANN?
 There's no silver bullet, unfortunately (remember the Universality Theorem?). We have to rely on trial and error. But we need a way to reliably assess the performance of a specific configuration, so that we can make some comparisons. Remember, we only tested our ANN on one of the (almost) infinite number of subsets of our data. How does our ANN perform *on average*? This can be quantified using *cross-validation*.  
 
 Let's prepare a function to extract the RMSE, given a dataset, a formula and a configuration for our ANN, so that it will be easier to repeat this step multiple times later. 
-```{r}
+```{r function for CV}
 mydata.subset$class <- mydata.subset$class*0.6+0.2 #recode to improve performance
 
 get.RMSE <- function(i, data, form, hidden, share.train=0.8, label="full"){
@@ -352,20 +362,16 @@ get.RMSE <- function(i, data, form, hidden, share.train=0.8, label="full"){
   test = data[-train.id,]
   nn <- neuralnet(form=form, train, hidden=c(hidden), 
                   lifesign = "full", threshold=0.01, linear.output = F)
-  if(!exists(nn)) {
   predict_testNN <- neuralnet::compute(nn, test)
-  predict_testNN = (predict_testNN$net.result * (max(data$class) - min(data$class))) + 
-                          min(data$class)
+  predict_testNN = predict_testNN$net.result 
   RMSE.NN = (sum((test$class - predict_testNN)^2) / nrow(test)) ^ 0.5
   #print(i)
-  } else {RMSE.NN <- NA}
   return(data.frame(config=paste(label, paste(hidden, collapse="_")), RMSE=RMSE.NN))
-
 }
 ```
-The formula above, takes a dataset, splits into a train and test subset, runs a NN, based on a given formula (`form`) and a given configuration `hidden`. It finally returns the RMSE.  
+The formula above, takes a dataset, splits into a train and test subset, runs a NN, based on a given formula (`form`) and a given configuration, specified by the `hidden` vector. It finally returns the RMSE.  
 We can now run this formula, e.g., 5 (it'd be better to do it 10>) times, and compare the output of a NNs with different number of nodes. We also try and see what happens when we add an additional hidden layer.
-```{r, eval=F}
+```{r test different configurations, eval=F}
 #runs in about ~10-15 minutes
 set.seed(200)
 RMSE.2 <- lapply(1:5, get.RMSE, mydata.subset, myformula, c(2))
@@ -386,14 +392,14 @@ load("RMSE.Rdata")
 
 
 Before looking at the output, let's also try out whether removing one variable improves the overall performance. Let's check first if there's any redundant (i.e., correlated) variables. 
-```{r, fig.align="center", fig.height=4, fig.width=5, message=F, warning=F}
+```{r Correlation matrix, fig.align="center", fig.height=4, fig.width=5, message=F, warning=F}
 res <- cor(scaled, use = "pairwise.complete.obs")
 corrplot(res, type = "upper", 
          tl.col = "black", tl.srt = 45, number.cex=0.6, addCoef.col = "black", diag=F)
 
 ```
 The area of loamy soils (`DL`) is negatively correlated both with the share of arable fields (`AK`) and with the distance to forest `WN`. We might wonder whether the performance improves when removing these variables.
-```{r, eval=F}
+```{r reduced NN, eval=F}
 
 RMSE.3.no_AK <- lapply(1:5, get.RMSE, mydata.subset, 
                        as.formula("class ~ NS + TM + WN + SN + DL + WW"), c(3),
@@ -404,7 +410,7 @@ RMSE.3.no_DL <- lapply(1:5, get.RMSE, mydata.subset,
 RMSE.df2 <- rbind(RMSE.df, do.call(rbind, c(RMSE.3.no_AK, RMSE.3.no_DL)))
 ```
 
-```{r, fig.align="center", fig.height=4, fig.width=5, message=F, warning=F}
+```{r plot CV output, fig.align="center", fig.height=4, fig.width=5, message=F, warning=F}
 ggplot(data=RMSE.df2) + 
   geom_boxplot(aes(x=config, y=RMSE))
 ```
@@ -414,17 +420,17 @@ When using too few nodes, the NN has a very bad performance (i.e., high RMSE). W
 
 ## Visual exploration of output
 Let's now take a final look at our output, spatially. 
-To do this, let's first make predictions on the whole study areas, using our original NN with 1 layer, and 5 nodes. 
-```{r}
+To do this, let's first make predictions on the whole study areas, using our original NN with 1 hidden layer, and 5 nodes. 
+```{r Predict over Study area}
 predict_alldata = neuralnet::compute(nn_5, mydata.scaled)
 predict_01 <- ifelse(predict_alldata$net.result<0.5, 0, 1)
 predict_01 <- data.frame(PRED01=predict_01, 
                          ZT_V100_=mydata$ZT_V100_ID)
-
+# join output to fishnet grid
 grid_sf2 <- left_join(grid_sf, predict_01, by="ZT_V100_")
 ```
 We do the same for the reduced NN, without the variable `AK`.
-```{r}
+```{r Predict over study area reduced NN}
 myformula2 <- class ~ NS + TM + WN + SN + DL + WW
 nn_3_noAK <- neuralnet(form=myformula2, train_recoded, hidden=c(3), 
                        lifesign = "full", threshold=0.01, linear.output = F)
@@ -437,7 +443,7 @@ grid_sf3 <- left_join(grid_sf, predict_01_noAK, by="ZT_V100_")
 ```
 Before plotting, let project also the continuous values of the habitat suitability index `HSI` onto our fishnet
 
-```{r}
+```{r Plotting}
 HSI <- mydata[,c(1,9)]
 names(HSI)[1] <- "ZT_V100_"
 grid_sf_hsi <- left_join(grid_sf, HSI,  by="ZT_V100_")
@@ -466,6 +472,28 @@ cowplot::plot_grid(pred.full, pred.noAK,
                    nrow=2, rel_heights = c(1,1,1,0.6))
 ```
 
+Overlap our prediction with the land use map
+```{r Overlap prediction with landuse map, fig.align="center", fig.height=4, fig.width=8, message=F, warning=F, cache=T}
+left <- ggplot(data=Biotopes_sf) + 
+  geom_sf(fill=NA) + 
+  geom_sf(data=grid_sf2, aes(fill=as.factor(PRED01)), alpha=0.5, col=NA) + 
+  labs(fill='Full ANN') +
+  theme_bw() + 
+  theme(axis.text = element_blank())
+right <- ggplot(data=Biotopes_sf) + 
+  geom_sf(fill=NA) + 
+  geom_sf(data=grid_sf3, aes(fill=as.factor(PRED01)), alpha=0.5, col=NA) + 
+  labs(fill='Red. ANN') +
+  theme_bw() + 
+  theme(axis.text = element_blank())
+
+cowplot::plot_grid(left, right, nrow=1)
+
+
+```
+
+
+
 **YOUR TURN** - How does the output compare across the two ANN configurations? How do they relate to the map of HSI? In what habitat types is the Corn Bunting predicted to occur with higher frequency?
 
 
@@ -473,13 +501,13 @@ cowplot::plot_grid(pred.full, pred.noAK,
 ## Export output
 Let's export our output. We can both export it as a simple .csv, and converting it to a shapefile, to be used in any GIS softwares
 
-```{r, warning=F, message=F, eval=F}
+```{r save output, warning=F, message=F, eval=T, results="hide"}
 dir.create("_output")
 st_write(grid_sf2, dsn="_output/CornBunting_NN3_pred.shp", append=T)
 st_write(grid_sf3, dsn="_output/CornBunting_NN3_noAK_pred.shp", append=T)
 
-write_csv(predict_01, path="_output/CornBunting_NN3_pred01.csv")
-write_csv(predict_01_noAK, path="_output/CornBunting_NN3_noAK_pred01.csv")
+write.csv(predict_01, file = "_output/CornBunting_NN3_pred01.csv")
+write.csv(predict_01_noAK, file = "_output/CornBunting_NN3_noAK_pred01.csv")
 ```
 
 
