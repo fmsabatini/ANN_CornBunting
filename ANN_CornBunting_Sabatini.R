@@ -1,7 +1,10 @@
 ## ---- eval=F, echo=F-------------------------------------------------------------------------------------------
 ## #Start live server
-## server <- livecode::serve_file(bitly = T)
- 
+## # Code for the instructor
+## s <- livecode::serve_file(bitly=FALSE)
+## system(paste0("ngrok http ", s$url), wait = FALSE, invisible = FALSE,
+##        show.output.on.console = FALSE, minimized = FALSE)
+
 
 ## ---- message=F, warning=F-------------------------------------------------------------------------------------
 # Install packages, if needed

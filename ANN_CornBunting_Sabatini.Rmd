@@ -100,8 +100,11 @@ Here, we will use ANN to train a model predicting the occurrence of the Corn Bun
 
 ## Prepare and check data
 ```{r, eval=F, echo=F}
-#Start live server
-server <- livecode::serve_file(bitly = T)
+#Start live server 
+# Code for the instructor
+s <- livecode::serve_file(bitly=FALSE) 
+system(paste0("ngrok http ", s$url), wait = FALSE, invisible = FALSE,
+       show.output.on.console = FALSE, minimized = FALSE)
 ```
 
 Let's open up R
