@@ -1,5 +1,5 @@
 ---
-title: "Arificial Neural Networks"
+title: "Artificial Neural Networks"
 subtitle: "Modelling Corn Bunting's habitat suitability"
 author: "Francesco Maria Sabatini"
 date: "26 June 2020"
